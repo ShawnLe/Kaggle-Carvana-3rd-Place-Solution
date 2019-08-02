@@ -6,8 +6,12 @@ from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from sklearn.model_selection import train_test_split
 from model import get_dilated_unet
 
-WIDTH = 1024
-HEIGHT = 1024
+import json
+
+# WIDTH = 1024
+# HEIGHT = 1024
+WIDTH = 640
+HEIGHT = 480
 BATCH_SIZE = 2
 
 
@@ -47,20 +51,26 @@ def train_generator(df):
             y_batch = []
             
             end = min(start + BATCH_SIZE, len(df))
-            ids_train_batch = df.iloc[shuffle_indices[start:end]]
+            # ids_train_batch = df.iloc[shuffle_indices[start:end]]
+            ids_train_batch = df[start:end]
             
-            for _id in ids_train_batch.values:
+            # for _id in ids_train_batch.values:
+            for _id in ids_train_batch:
                 img = cv2.imread('input/train_hq/{}.jpg'.format(_id))
+                assert img is not None
                 img = cv2.resize(img, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
                 
-                mask = cv2.imread('input/train_masks/{}_mask.png'.format(_id), cv2.IMREAD_GRAYSCALE)
+                mask_id = int(_id.split('color')[1])
+                # mask = cv2.imread('input/train_masks/{}_mask.png'.format(_id), cv2.IMREAD_GRAYSCALE)
+                mask = cv2.imread('input/train_masks/{:04d}.png'.format(mask_id),cv2.IMREAD_GRAYSCALE)
+                assert mask is not None
                 mask = cv2.resize(mask, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
                 mask = np.expand_dims(mask, axis=-1)
                 assert mask.ndim == 3
                 
                 # === You can add data augmentations here. === #
-                if np.random.random() < 0.5:
-                    img, mask = img[:, ::-1, :], mask[..., ::-1, :]  # random horizontal flip
+                # if np.random.random() < 0.5:
+                #     img, mask = img[:, ::-1, :], mask[..., ::-1, :]  # random horizontal flip
                 
                 x_batch.append(img)
                 y_batch.append(mask)
@@ -79,13 +89,17 @@ def valid_generator(df):
             y_batch = []
 
             end = min(start + BATCH_SIZE, len(df))
-            ids_train_batch = df.iloc[start:end]
+            # ids_train_batch = df.iloc[start:end]
+            ids_train_batch = df[start:end]
 
-            for _id in ids_train_batch.values:
+            # for _id in ids_train_batch.values:
+            for _id in ids_train_batch:
                 img = cv2.imread('input/train_hq/{}.jpg'.format(_id))
                 img = cv2.resize(img, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
 
-                mask = cv2.imread('input/train_masks/{}_mask.png'.format(_id),
+                mask_id = int(_id.split('color')[1])
+                # mask = cv2.imread('input/train_masks/{}_mask.png'.format(_id),
+                mask = cv2.imread('input/train_masks/{:04d}.png'.format(mask_id),
                                   cv2.IMREAD_GRAYSCALE)
                 mask = cv2.resize(mask, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
                 mask = np.expand_dims(mask, axis=-1)
@@ -102,13 +116,18 @@ def valid_generator(df):
 
 if __name__ == '__main__':
 
-    df_train = pd.read_csv('input/train_masks.csv')
-    ids_train = df_train['img'].map(lambda s: s.split('.')[0])
+    # df_train = pd.read_csv('input/train_masks.csv')
+    with open('input/image_list.json', 'r') as f:
+        df_train = json.load(f)
+    # ids_train = df_train['img'].map(lambda s: s.split('.')[0])
+    ids_train = list(map(lambda s : s.split('.')[0], df_train['img']))    
+    # print (ids_train)
 
     ids_train, ids_valid = train_test_split(ids_train, test_size=0.1)
 
     model = get_dilated_unet(
-        input_shape=(1024, 1024, 3),
+        # input_shape=(1024, 1024, 3),
+        input_shape=(480,640,3),
         mode='cascade',
         filters=32,
         n_class=1
