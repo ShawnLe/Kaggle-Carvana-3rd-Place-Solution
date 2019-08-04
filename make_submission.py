@@ -5,7 +5,7 @@ import threading
 import queue
 import tensorflow as tf
 from tqdm import tqdm
-from keras.models import load_model
+from tensorflow.keras.models import load_model
 
 WIDTH = 1024
 HEIGHT = 1024
@@ -36,7 +36,7 @@ model = load_model(
     custom_objects={'bce_dice_loss': bce_dice_loss, 'dice_coef': dice_coef}
 )
 
-graph = tf.get_default_graph()
+graph = tf.compat.v1.get_default_graph()
 
 q_size = 10
 
