@@ -1,18 +1,32 @@
-import threading
-import cv2
-import numpy as np
-import pandas as pd
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from sklearn.model_selection import train_test_split
-from model import get_dilated_unet
-
 import json
+import threading
+import numpy as np
+import cv2
+from sklearn.model_selection import train_test_split
 
-# WIDTH = 1024
-# HEIGHT = 1024
-WIDTH = 640
-HEIGHT = 480
-BATCH_SIZE = 2
+import tensorflow as tf
+
+from model import DilatedUnet
+from losses import dice_coef
+
+@tf.function 
+def train_step(inputs, y_true):
+    with tf.GradientTape() as tape:
+        y_pred = dun(inputs)
+        loss = dun.loss(y_true, y_pred)
+
+    gradients = tape.gradient(loss, dun.trainable_variables)
+    optim.apply_gradients(zip(gradients, dun.trainable_variables))
+
+    train_loss(loss)
+    # train_acc()
+
+@tf.function
+def test_step(inputs, y_true):
+    y_pred = dun(inputs)
+    t_loss = dun.loss(y_true, y_pred)
+
+    test_loss(t_loss)
 
 
 class ThreadSafeIterator:
@@ -81,78 +95,46 @@ def train_generator(df):
             yield x_batch, y_batch
 
 
-@threadsafe_generator
-def valid_generator(df):
-    while True:
-        for start in range(0, len(df), BATCH_SIZE):
-            x_batch = []
-            y_batch = []
-
-            end = min(start + BATCH_SIZE, len(df))
-            # ids_train_batch = df.iloc[start:end]
-            ids_train_batch = df[start:end]
-
-            # for _id in ids_train_batch.values:
-            for _id in ids_train_batch:
-                img = cv2.imread('input/train_hq/{}.jpg'.format(_id))
-                img = cv2.resize(img, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
-
-                mask_id = int(_id.split('color')[1])
-                # mask = cv2.imread('input/train_masks/{}_mask.png'.format(_id),
-                mask = cv2.imread('input/train_masks/{:04d}.png'.format(mask_id),
-                                  cv2.IMREAD_GRAYSCALE)
-                mask = cv2.resize(mask, (WIDTH, HEIGHT), interpolation=cv2.INTER_AREA)
-                mask = np.expand_dims(mask, axis=-1)
-                assert mask.ndim == 3
-                
-                x_batch.append(img)
-                y_batch.append(mask)
-
-            x_batch = np.array(x_batch, np.float32) / 255.
-            y_batch = np.array(y_batch, np.float32) / 255.
-
-            yield x_batch, y_batch
-
-
 if __name__ == '__main__':
 
-    # df_train = pd.read_csv('input/train_masks.csv')
+    BATCH_SIZE = 2
+    WIDTH = 640
+    HEIGHT = 480
+
     with open('input/image_list.json', 'r') as f:
         df_train = json.load(f)
-    # ids_train = df_train['img'].map(lambda s: s.split('.')[0])
-    ids_train = list(map(lambda s : s.split('.')[0], df_train['img']))    
-    # print (ids_train)
 
-    ids_train, ids_valid = train_test_split(ids_train, test_size=0.1)
+    ids_train = list(map(lambda s: s.split('.')[0], df_train['img']))
+    ids_train, ids_valid = train_test_split(ids_train, test_size=.1)
+    train_gen = train_generator(ids_train)
 
-    model = get_dilated_unet(
-        # input_shape=(1024, 1024, 3),
-        input_shape=(480,640,3),
-        mode='cascade',
-        filters=32,
-        n_class=1
-    )
+    input = tf.Variable(tf.random.normal((1,480,640,1)))
+    
+    # out = dilated_net(input)
+    # print('out = ', out)
 
-    callbacks = [EarlyStopping(monitor='val_dice_coef',
-                               patience=10,
-                               verbose=1,
-                               min_delta=1e-4,
-                               mode='max'),
-                 ReduceLROnPlateau(monitor='val_dice_coef',
-                                   factor=0.2,
-                                   patience=5,
-                                   verbose=1,
-                                   epsilon=1e-4,
-                                   mode='max'),
-                 ModelCheckpoint(monitor='val_dice_coef',
-                                 filepath='model_weights.hdf5',
-                                 save_best_only=True,
-                                 mode='max')]
+    dun = DilatedUnet(mode='cascade',
+                    filters=32,
+                    n_class=1)
 
-    model.fit_generator(generator=train_generator(ids_train),
-                        steps_per_epoch=np.ceil(float(len(ids_train)) / float(BATCH_SIZE)),
-                        epochs=100,
-                        verbose=2,
-                        callbacks=callbacks,
-                        validation_data=valid_generator(ids_valid),
-                        validation_steps=np.ceil(float(len(ids_valid)) / float(BATCH_SIZE)))
+    optim = tf.keras.optimizers.RMSprop(learning_rate=dun.lr)
+
+    train_loss = tf.keras.metrics.Mean(name='train_loss')
+    # train_acc = tf.keras.metrics.SparseCategoricalAccuracy(name='train_accuracy')
+
+    test_loss = tf.keras.metrics.Mean(name='test_loss')
+    # test_acc = tf.keras.metrics.SparseCategoricalAccuracy(name='test_accuracy')
+
+    EPOCHS = 100
+    MAX_ITER = 20
+    for epoch in range(EPOCHS):
+        for iter in range(MAX_ITER):
+            x_batch, y_batch = next(train_gen)
+
+            train_step(x_batch, y_batch)
+            # skip test_step
+
+            exit()
+
+        template = 'Epoch {}, Loss: {}'
+        print(template.format(epoch, train_loss.result()))
